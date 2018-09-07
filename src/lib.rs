@@ -36,6 +36,7 @@ impl Display for Error {
 impl StdError for Error {
 }
 
+/// Possible status of a thread.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ThreadStatus {
     /// `fork()` done but not yet attached

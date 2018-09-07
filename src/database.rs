@@ -1,3 +1,5 @@
+//! This module is responsible for recording information in a SQLite database.
+
 use std::path::Path;
 
 use ::Error;
@@ -7,6 +9,7 @@ use ::Error;
 pub struct ProcessId(u32);
 
 bitflags! {
+    /// Bit flags associated with a file access logged in the database.
     pub struct FileOp: u32 {
         /// File's previous content are read
         const READ  = 0b00001;
