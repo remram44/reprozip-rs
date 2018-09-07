@@ -37,7 +37,7 @@ impl StdError for Error {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ProcStatus {
+enum ThreadStatus {
     /// `fork()` done but not yet attached
     Allocated,
     /// Running process
@@ -49,7 +49,7 @@ enum ProcStatus {
 /// A thread that we are tracking.
 struct Thread {
     identifier: ProcessId,
-    status: ProcStatus,
+    status: ThreadStatus,
     tid: Pid,
     thread_group: Rc<ThreadGroup>,
 }
@@ -72,7 +72,7 @@ struct Processes {
 impl Processes {
     /// Add the first process, which has no parent.
     fn add_first(&mut self, tid: Pid, thread_group: Rc<ThreadGroup>,
-                 status: ProcStatus, database: &mut Database)
+                 status: ThreadStatus, database: &mut Database)
         -> Result<ProcessId, Error>
     {
         let identifier = database.add_process(
@@ -95,7 +95,7 @@ impl Processes {
 
     /// Add a new process, which was forked from another.
     fn add(&mut self, tid: Pid, thread_group: Rc<ThreadGroup>,
-           status: ProcStatus, parent: ProcessId, is_thread: bool,
+           status: ThreadStatus, parent: ProcessId, is_thread: bool,
            database: &mut Database)
         -> Result<ProcessId, Error>
     {
@@ -180,7 +180,7 @@ impl Tracer {
                     Rc::new(ThreadGroup {
                         working_dir: wd.clone(),
                     }),
-                    ProcStatus::Allocated,
+                    ThreadStatus::Allocated,
                     &mut self.database,
                 )?;
                 self.database.add_file_open(identifier, &wd,
