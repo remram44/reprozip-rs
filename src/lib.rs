@@ -9,14 +9,15 @@ use std::error::Error as StdError;
 use std::ffi::CString;
 use std::fmt::Display;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
-use nix::sys::ptrace;
-use nix::sys::wait::waitpid;
 use nix::unistd::{ForkResult, Pid, fork, execvp};
+use nix::sys::ptrace;
 use nix::sys::signal::{Signal, kill};
 
 use database::{Database, FileOp, ProcessId};
 
+/// General error type returned by this crate.
 #[derive(Debug)]
 pub enum Error {
     InvalidCommand,
@@ -35,46 +36,123 @@ impl Display for Error {
 impl StdError for Error {
 }
 
-struct Process {
-    identifier: ProcessId,
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ProcStatus {
+    /// `fork()` done but not yet attached
+    Allocated,
+    /// Running process
+    Attached,
+    /// Attached but no corresponding fork() has returned yet
+    Unknown,
 }
 
+/// A thread that we are tracking.
+struct Thread {
+    identifier: ProcessId,
+    status: ProcStatus,
+    tid: Pid,
+    thread_group: Rc<ThreadGroup>,
+}
+
+/// A group of threads, i.e. a process.
+///
+/// All the threads in a process share some attributes, such as the environment
+/// and the working directory.
 struct ThreadGroup {
     working_dir: PathBuf,
 }
 
+/// Structure holding all the running threads and processes.
 #[derive(Default)]
 struct Processes {
-    processes: Vec<Process>,
+    pid2process: HashMap<Pid, Thread>,
+    identifier2pid: HashMap<ProcessId, Pid>,
 }
 
 impl Processes {
-    fn new(&mut self, pid: Pid) -> &mut Process {
-        unimplemented!()
+    /// Add the first process, which has no parent.
+    fn add_first(&mut self, tid: Pid, thread_group: Rc<ThreadGroup>,
+                 status: ProcStatus, database: &mut Database)
+        -> Result<ProcessId, Error>
+    {
+        let identifier = database.add_process(
+            None,
+            &thread_group.working_dir,
+            false,
+        )?;
+        self.pid2process.insert(
+            tid,
+            Thread {
+                identifier,
+                status,
+                tid,
+                thread_group,
+            },
+        );
+        self.identifier2pid.insert(identifier, tid);
+        Ok(identifier)
+    }
+
+    /// Add a new process, which was forked from another.
+    fn add(&mut self, tid: Pid, thread_group: Rc<ThreadGroup>,
+           status: ProcStatus, parent: ProcessId, is_thread: bool,
+           database: &mut Database)
+        -> Result<ProcessId, Error>
+    {
+        let identifier = database.add_process(
+            Some(parent),
+            &thread_group.working_dir,
+            is_thread,
+        )?;
+        self.pid2process.insert(
+            tid,
+            Thread {
+                identifier,
+                status,
+                tid,
+                thread_group,
+            },
+        );
+        self.identifier2pid.insert(identifier, tid);
+        Ok(identifier)
+    }
+
+    fn with_pid(&self, pid: Pid) -> &Thread {
+        self.pid2process.get(&pid).unwrap()
+    }
+
+    fn with_pid_mut(&mut self, pid: Pid) -> &mut Thread {
+        self.pid2process.get_mut(&pid).unwrap()
+    }
+
+    fn with_identifier(&self, id: ProcessId) -> &Thread {
+        let pid = *self.identifier2pid.get(&id).unwrap();
+        self.with_pid(pid)
+    }
+
+    fn with_identifier_mut(&mut self, id: ProcessId) -> &mut Thread {
+        let pid = *self.identifier2pid.get(&id).unwrap();
+        self.with_pid_mut(pid)
     }
 }
 
+/// Tracer following processes and logging their execution to a `Database`.
 #[derive(Default)]
 struct Tracer {
     processes: Processes,
-    threadgroups: HashMap<i32, ThreadGroup>,
     database: Database,
 }
 
 impl Tracer {
-    pub fn new() -> Tracer {
-        Default::default()
-    }
-
-    pub fn trace<D: AsRef<Path>, C: AsRef<[u8]>>(
-        &mut self,
+    fn trace<D: AsRef<Path>, C: AsRef<[u8]>>(
+        self,
         command: &[C], database: D) -> Result<i32, Error>
     {
         self.trace_arg0(command, &command[0], database)
     }
 
-    pub fn trace_arg0<D: AsRef<Path>, C: AsRef<[u8]>, C2: AsRef<[u8]>>(
-        &mut self,
+    fn trace_arg0<D: AsRef<Path>, C: AsRef<[u8]>, C2: AsRef<[u8]>>(
+        mut self,
         command: &[C], arg0: C2, database: D) -> Result<i32, Error>
     {
         let args = {
@@ -97,18 +175,19 @@ impl Tracer {
             Ok(ForkResult::Parent { child }) => {
                 println!("Child created, pid={}", child);
                 let wd = current_dir().unwrap();
-                self.threadgroups.insert(child.into(), ThreadGroup {
-                    working_dir: wd.clone(),
-                });
-                {
-                    let process = self.processes.new(child);
-                    self.database.add_first_process(process.identifier, &wd)?;
-                    self.database.add_file_open(process.identifier, &wd,
-                                                FileOp::WDIR, true)?;
-                }
-                let ret = self.trace_process(child);
-                self.database.commit();
-                ret
+                let identifier = self.processes.add_first(
+                    child,
+                    Rc::new(ThreadGroup {
+                        working_dir: wd.clone(),
+                    }),
+                    ProcStatus::Allocated,
+                    &mut self.database,
+                )?;
+                self.database.add_file_open(identifier, &wd,
+                                            FileOp::WDIR, true)?;
+                let ret = self.trace_process(child)?;
+                self.database.commit()?;
+                Ok(ret)
             }
             Ok(ForkResult::Child) => {
                 // Trace this process
@@ -143,8 +222,22 @@ impl Tracer {
     }
 }
 
+/// Run a command and trace it.
 pub fn trace<D: AsRef<Path>, C: AsRef<[u8]>>(
     command: &[C], database: D) -> Result<i32, Error>
 {
-    Tracer::new().trace(command, database)
+    <Tracer as Default>::default().trace(command, database)
+}
+
+/// Run a command and trace it, replacing `argv[0]`.
+///
+/// For example:
+/// ```rust,no_run
+/// # use reprozip::trace_arg0;
+/// trace_arg0(&[b"/bin/busybox", b"hello world!"], b"echo", "/tmp/db");
+/// ```
+pub fn trace_arg0<D: AsRef<Path>, C: AsRef<[u8]>, C2: AsRef<[u8]>>(
+    command: &[C], arg0: C2, database: D) -> Result<i32, Error>
+{
+    <Tracer as Default>::default().trace_arg0(command, arg0, database)
 }

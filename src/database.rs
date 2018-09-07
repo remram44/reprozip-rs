@@ -2,7 +2,8 @@ use std::path::Path;
 
 use ::Error;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// The ID assigned to a process in the database.
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub struct ProcessId(u32);
 
 bitflags! {
@@ -20,17 +21,21 @@ bitflags! {
     }
 }
 
+/// The database, where we record events about the traced program.
 #[derive(Default)]
 pub struct Database {
 }
 
 impl Database {
-    pub fn add_first_process(&mut self, id: ProcessId, working_dir: &Path)
-        -> Result<(), Error>
+    /// Record the creation of a thread or process.
+    pub fn add_process(&mut self, parent: Option<ProcessId>,
+                       working_dir: &Path, is_thread: bool)
+        -> Result<ProcessId, Error>
     {
         unimplemented!()
     }
 
+    /// Record a file access.
     pub fn add_file_open(&mut self, id: ProcessId,
                          path: &Path, mode: FileOp, is_directory: bool)
         -> Result<(), Error>
@@ -38,7 +43,8 @@ impl Database {
         unimplemented!()
     }
 
-    pub fn commit(&mut self) -> Result<(), Error> {
+    /// Commit the trace to disk.
+    pub fn commit(self) -> Result<(), Error> {
         unimplemented!()
     }
 }
