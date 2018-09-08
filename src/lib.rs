@@ -11,9 +11,11 @@ use std::fmt::Display;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
+use nix::Error as NixError;
 use nix::unistd::{ForkResult, Pid, fork, execvp};
 use nix::sys::ptrace;
 use nix::sys::signal::{Signal, kill};
+use nix::sys::wait;
 
 use database::{Database, FileOp, ProcessId};
 
@@ -36,6 +38,19 @@ impl Display for Error {
 impl StdError for Error {
 }
 
+impl From<NixError> for Error {
+    fn from(err: NixError) -> Error {
+        Error::Internal(format!("{}", err))
+    }
+}
+
+/// Exit status from a process, either a return code or a signal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExitStatus {
+    Return(i32),
+    Signal(Signal),
+}
+
 /// Possible status of a thread.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ThreadStatus {
@@ -47,6 +62,14 @@ enum ThreadStatus {
     Unknown,
 }
 
+/// A group of threads, i.e. a process.
+///
+/// All the threads in a process share some attributes, such as the environment
+/// and the working directory.
+struct ThreadGroup {
+    working_dir: PathBuf,
+}
+
 /// A thread that we are tracking.
 struct Thread {
     identifier: ProcessId,
@@ -55,12 +78,12 @@ struct Thread {
     thread_group: Rc<ThreadGroup>,
 }
 
-/// A group of threads, i.e. a process.
-///
-/// All the threads in a process share some attributes, such as the environment
-/// and the working directory.
-struct ThreadGroup {
-    working_dir: PathBuf,
+impl Thread {
+    fn exit(self, exitstatus: ExitStatus, database: &mut Database)
+        -> Result<(), Error>
+    {
+        unimplemented!()
+    }
 }
 
 /// Structure holding all the running threads and processes.
@@ -118,6 +141,15 @@ impl Processes {
         Ok(identifier)
     }
 
+    fn exit(&mut self, tid: Pid, exitstatus: ExitStatus,
+            database: &mut Database)
+        -> Result<(), Error>
+    {
+        let thread = self.pid2process.remove(&tid).unwrap();
+        self.identifier2pid.remove(&thread.identifier);
+        thread.exit(exitstatus, database)
+    }
+
     fn with_pid(&self, pid: Pid) -> &Thread {
         self.pid2process.get(&pid).unwrap()
     }
@@ -147,14 +179,14 @@ struct Tracer {
 impl Tracer {
     fn trace<D: AsRef<Path>, C: AsRef<[u8]>>(
         self,
-        command: &[C], database: D) -> Result<i32, Error>
+        command: &[C], database: D) -> Result<ExitStatus, Error>
     {
         self.trace_arg0(command, &command[0], database)
     }
 
     fn trace_arg0<D: AsRef<Path>, C: AsRef<[u8]>, C2: AsRef<[u8]>>(
         mut self,
-        command: &[C], arg0: C2, database: D) -> Result<i32, Error>
+        command: &[C], arg0: C2, database: D) -> Result<ExitStatus, Error>
     {
         let args = {
             let mut vec = Vec::new();
@@ -218,14 +250,46 @@ impl Tracer {
         }
     }
 
-    fn trace_process(&mut self, child: Pid) -> Result<i32, Error> {
-        unimplemented!()
+    /// Main tracing procedure, waits for events.
+    fn trace_process(&mut self, first_proc: Pid) -> Result<ExitStatus, Error> {
+        let mut first_exit_code = None;
+        loop {
+            match wait::waitpid(Pid::from_raw(-1),
+                                Some(wait::WaitPidFlag::__WALL))? {
+                // A program exited
+                wait::WaitStatus::Exited(pid, status) => {
+                    let exitstatus = ExitStatus::Return(status);
+                    if pid == first_proc {
+                        first_exit_code = Some(exitstatus);
+                    }
+                    self.processes.exit(pid, exitstatus, &mut self.database)?;
+                    if self.processes.empty() {
+                        break;
+                    }
+                    continue;
+                }
+                wait::WaitStatus::Signaled(pid, sig, _) => {
+                    let exitstatus = ExitStatus::Signal(sig);
+                    if pid == first_proc {
+                        first_exit_code = Some(exitstatus);
+                    }
+                    self.processes.exit(pid, exitstatus, &mut self.database)?;
+                    if self.processes.empty() {
+                        break;
+                    }
+                    continue;
+                }
+                // TODO: 
+                _ => unimplemented!(),
+            }
+        }
+        Ok(first_exit_code)
     }
 }
 
 /// Run a command and trace it.
 pub fn trace<D: AsRef<Path>, C: AsRef<[u8]>>(
-    command: &[C], database: D) -> Result<i32, Error>
+    command: &[C], database: D) -> Result<ExitStatus, Error>
 {
     <Tracer as Default>::default().trace(command, database)
 }
@@ -238,7 +302,7 @@ pub fn trace<D: AsRef<Path>, C: AsRef<[u8]>>(
 /// trace_arg0(&[b"/bin/busybox", b"hello world!"], b"echo", "/tmp/db");
 /// ```
 pub fn trace_arg0<D: AsRef<Path>, C: AsRef<[u8]>, C2: AsRef<[u8]>>(
-    command: &[C], arg0: C2, database: D) -> Result<i32, Error>
+    command: &[C], arg0: C2, database: D) -> Result<ExitStatus, Error>
 {
     <Tracer as Default>::default().trace_arg0(command, arg0, database)
 }
