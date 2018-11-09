@@ -3,7 +3,7 @@
 use std::borrow::Cow;
 use std::path::Path;
 
-use ::{Error, ExitStatus};
+use {Error, ExitStatus};
 
 /// The ID assigned to a process in the database.
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
@@ -32,14 +32,16 @@ pub struct Database {
 
 impl Database {
     pub fn new<D: AsRef<Path>>(path: D) -> Result<Database, Error> {
-        Ok(Database { next_process: 0})
+        Ok(Database { next_process: 0 })
     }
 
     /// Record the creation of a thread or process.
-    pub fn add_process(&mut self, parent: Option<ProcessId>,
-                       working_dir: &Path, is_thread: bool)
-        -> Result<ProcessId, Error>
-    {
+    pub fn add_process(
+        &mut self,
+        parent: Option<ProcessId>,
+        working_dir: &Path,
+        is_thread: bool,
+    ) -> Result<ProcessId, Error> {
         // TODO
         let proc = self.next_process;
         self.next_process += 1;
@@ -52,10 +54,13 @@ impl Database {
     }
 
     /// Record a file access.
-    pub fn add_file_open(&mut self, id: ProcessId,
-                         path: &Path, mode: FileOp, is_directory: bool)
-        -> Result<(), Error>
-    {
+    pub fn add_file_open(
+        &mut self,
+        id: ProcessId,
+        path: &Path,
+        mode: FileOp,
+        is_directory: bool,
+    ) -> Result<(), Error> {
         // TODO
         println!("Adding file open process={} path={} mode={:?}, \
                   is_directory={}",
@@ -64,12 +69,13 @@ impl Database {
     }
 
     /// Record the death of a thread or process.
-    pub fn process_exit(&mut self, id: ProcessId, status: ExitStatus)
-        -> Result<(), Error>
-    {
+    pub fn process_exit(
+        &mut self,
+        id: ProcessId,
+        status: ExitStatus,
+    ) -> Result<(), Error> {
         // TODO
-        println!("Adding process exit {} status={:?}",
-                 id.0, status);
+        println!("Adding process exit {} status={:?}", id.0, status);
         Ok(())
     }
 

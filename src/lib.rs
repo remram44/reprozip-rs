@@ -12,10 +12,10 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use nix::Error as NixError;
-use nix::unistd::{ForkResult, Pid, fork, execvp};
 use nix::sys::ptrace;
 use nix::sys::signal::{Signal, kill};
 use nix::sys::wait;
+use nix::unistd::{ForkResult, Pid, fork, execvp};
 
 use database::{Database, FileOp, ProcessId};
 
@@ -35,8 +35,7 @@ impl Display for Error {
     }
 }
 
-impl StdError for Error {
-}
+impl StdError for Error {}
 
 impl From<NixError> for Error {
     fn from(err: NixError) -> Error {
@@ -63,7 +62,7 @@ struct ThreadGroup {
 enum Thread {
     Unknown { tid: Pid },
     Allocated(ThreadInfo),
-    Attached(ThreadInfo)
+    Attached(ThreadInfo),
 }
 
 #[derive(Clone)]
@@ -74,9 +73,11 @@ struct ThreadInfo {
 }
 
 impl ThreadInfo {
-    fn exit(self, exitstatus: ExitStatus, database: &mut Database)
-        -> Result<(), Error>
-    {
+    fn exit(
+        self,
+        exitstatus: ExitStatus,
+        database: &mut Database,
+    ) -> Result<(), Error> {
         database.process_exit(self.identifier, exitstatus)
     }
 }
@@ -90,15 +91,14 @@ struct Processes {
 
 impl Processes {
     /// Add the first process, which has no parent.
-    fn add_first(&mut self, tid: Pid, thread_group: Rc<ThreadGroup>,
-                 database: &mut Database)
-        -> Result<ProcessId, Error>
-    {
-        let identifier = database.add_process(
-            None,
-            &thread_group.working_dir,
-            false,
-        )?;
+    fn add_first(
+        &mut self,
+        tid: Pid,
+        thread_group: Rc<ThreadGroup>,
+        database: &mut Database,
+    ) -> Result<ProcessId, Error> {
+        let identifier =
+            database.add_process(None, &thread_group.working_dir, false)?;
         self.pid2process.insert(
             tid,
             Thread::Allocated(ThreadInfo {
@@ -120,10 +120,12 @@ impl Processes {
         Ok(())
     }
 
-    fn exit(&mut self, tid: Pid, exitstatus: ExitStatus,
-            database: &mut Database)
-        -> Result<(), Error>
-    {
+    fn exit(
+        &mut self,
+        tid: Pid,
+        exitstatus: ExitStatus,
+        database: &mut Database,
+    ) -> Result<(), Error> {
         let thread = self.pid2process.remove(&tid).unwrap();
         match thread {
             Thread::Allocated(info) | Thread::Attached(info) => {
@@ -132,7 +134,8 @@ impl Processes {
             }
             Thread::Unknown { .. } => {}
         }
-        println!("Process exited, {} processes remain", self.pid2process.len());
+        println!("Process exited, {} processes remain",
+                 self.pid2process.len());
         Ok(())
     }
 
@@ -178,14 +181,17 @@ impl Tracer {
     }
 
     fn trace<C: AsRef<[u8]>>(
-        self, command: &[C]) -> Result<ExitStatus, Error>
-    {
+        self,
+        command: &[C],
+    ) -> Result<ExitStatus, Error> {
         self.trace_arg0(command, &command[0])
     }
 
     fn trace_arg0<C: AsRef<[u8]>, C2: AsRef<[u8]>>(
-        mut self, command: &[C], arg0: C2) -> Result<ExitStatus, Error>
-    {
+        mut self,
+        command: &[C],
+        arg0: C2,
+    ) -> Result<ExitStatus, Error> {
         let args = {
             let mut vec = Vec::new();
             for c in command.into_iter() {
@@ -224,11 +230,12 @@ impl Tracer {
                 match ptrace::traceme() {
                     Ok(()) => {}
                     Err(err) => {
-                        eprintln!("couldn't use ptrace: {}\n\
-                                  This could be caused by a security policy or \
-                                  isolation mechanism (such as Docker), see \
-                                  http://bit.ly/2bZd8Fa",
-                                  err);
+                        eprintln!(
+                            "couldn't use ptrace: {}\nThis could be caused \
+                             by a security policy or isolation mechanism \
+                             (such as Docker), see http://bit.ly/2bZd8Fa",
+                            err
+                        );
                         std::process::exit(125);
                     }
                 }
@@ -238,7 +245,8 @@ impl Tracer {
                 match execvp(&arg0, &args) {
                     Ok(_) => unreachable!(),
                     Err(err) => {
-                        eprintln!("Coundn't execute the target command: {}", err);
+                        eprintln!("Coundn't execute the target command: {}",
+                                  err);
                         std::process::exit(127);
                     }
                 }
@@ -291,7 +299,8 @@ impl Tracer {
                         continue;
                     }
                     let thread = self.processes.get_pid_mut(pid);
-                    if let Some(info) = if let Thread::Allocated(info) = thread {
+                    if let Some(info) = if let Thread::Allocated(info) = thread
+                    {
                         // Have to do this in two steps to avoid borrow error
                         Some(info.clone())
                     } else {
@@ -333,21 +342,24 @@ impl Tracer {
     }
 
     fn set_options(pid: Pid) -> Result<(), Error> {
-        ptrace::setoptions(pid,
-                           ptrace::Options::PTRACE_O_TRACESYSGOOD |
-                           ptrace::Options::PTRACE_O_EXITKILL |
-                           ptrace::Options::PTRACE_O_TRACECLONE |
-                           ptrace::Options::PTRACE_O_TRACEFORK |
-                           ptrace::Options::PTRACE_O_TRACEVFORK |
-                           ptrace::Options::PTRACE_O_TRACEEXEC)?;
+        ptrace::setoptions(
+            pid,
+            ptrace::Options::PTRACE_O_TRACESYSGOOD
+                | ptrace::Options::PTRACE_O_EXITKILL
+                | ptrace::Options::PTRACE_O_TRACECLONE
+                | ptrace::Options::PTRACE_O_TRACEFORK
+                | ptrace::Options::PTRACE_O_TRACEVFORK
+                | ptrace::Options::PTRACE_O_TRACEEXEC,
+        )?;
         Ok(())
     }
 }
 
 /// Run a command and trace it.
 pub fn trace<D: AsRef<Path>, C: AsRef<[u8]>>(
-    command: &[C], database: D) -> Result<ExitStatus, Error>
-{
+    command: &[C],
+    database: D,
+) -> Result<ExitStatus, Error> {
     Tracer::new(database)?.trace(command)
 }
 
@@ -359,7 +371,9 @@ pub fn trace<D: AsRef<Path>, C: AsRef<[u8]>>(
 /// trace_arg0(&[b"/bin/busybox", b"hello world!"], b"echo", "/tmp/db");
 /// ```
 pub fn trace_arg0<D: AsRef<Path>, C: AsRef<[u8]>, C2: AsRef<[u8]>>(
-    command: &[C], arg0: C2, database: D) -> Result<ExitStatus, Error>
-{
+    command: &[C],
+    arg0: C2,
+    database: D,
+) -> Result<ExitStatus, Error> {
     Tracer::new(database)?.trace_arg0(command, arg0)
 }

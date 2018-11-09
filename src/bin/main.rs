@@ -6,7 +6,7 @@ use reprozip::{ExitStatus, trace};
 
 fn main() {
     match trace(&[b"echo", b"test"], "/tmp/db") {
-        Ok(ExitStatus::Return(0)) => {},
+        Ok(ExitStatus::Return(0)) => {}
         Ok(ExitStatus::Return(status)) => {
             eprintln!("Warning: program returned non-zero exit status {}",
                       status);
