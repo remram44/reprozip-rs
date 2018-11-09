@@ -150,6 +150,10 @@ impl Processes {
         thread.exit(exitstatus, database)
     }
 
+    fn is_empty(&self) -> bool {
+        self.pid2process.is_empty()
+    }
+
     fn with_pid(&self, pid: Pid) -> &Thread {
         self.pid2process.get(&pid).unwrap()
     }
@@ -263,7 +267,7 @@ impl Tracer {
                         first_exit_code = Some(exitstatus);
                     }
                     self.processes.exit(pid, exitstatus, &mut self.database)?;
-                    if self.processes.empty() {
+                    if self.processes.is_empty() {
                         break;
                     }
                     continue;
@@ -274,16 +278,17 @@ impl Tracer {
                         first_exit_code = Some(exitstatus);
                     }
                     self.processes.exit(pid, exitstatus, &mut self.database)?;
-                    if self.processes.empty() {
+                    if self.processes.is_empty() {
                         break;
                     }
                     continue;
                 }
-                // TODO: 
+                // TODO: Handle syscalls
                 _ => unimplemented!(),
             }
         }
-        Ok(first_exit_code)
+        Ok(first_exit_code.expect("Trace finished but we never got the first \
+                                   process' exit code"))
     }
 }
 
