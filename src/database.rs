@@ -26,12 +26,15 @@ bitflags! {
 }
 
 /// The database, where we record events about the traced program.
-#[derive(Default)]
 pub struct Database {
     next_process: u32,
 }
 
 impl Database {
+    pub fn new<D: AsRef<Path>>(path: D) -> Result<Database, Error> {
+        Ok(Database { next_process: 0})
+    }
+
     /// Record the creation of a thread or process.
     pub fn add_process(&mut self, parent: Option<ProcessId>,
                        working_dir: &Path, is_thread: bool)

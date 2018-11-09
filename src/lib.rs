@@ -174,23 +174,27 @@ impl Processes {
 }
 
 /// Tracer following processes and logging their execution to a `Database`.
-#[derive(Default)]
 struct Tracer {
     processes: Processes,
     database: Database,
 }
 
 impl Tracer {
-    fn trace<D: AsRef<Path>, C: AsRef<[u8]>>(
-        self,
-        command: &[C], database: D) -> Result<ExitStatus, Error>
-    {
-        self.trace_arg0(command, &command[0], database)
+    fn new<D: AsRef<Path>>(database: D) -> Result<Tracer, Error> {
+        Ok(Tracer {
+            processes: Default::default(),
+            database: Database::new(database)?,
+        })
     }
 
-    fn trace_arg0<D: AsRef<Path>, C: AsRef<[u8]>, C2: AsRef<[u8]>>(
-        mut self,
-        command: &[C], arg0: C2, database: D) -> Result<ExitStatus, Error>
+    fn trace<C: AsRef<[u8]>>(
+        self, command: &[C]) -> Result<ExitStatus, Error>
+    {
+        self.trace_arg0(command, &command[0])
+    }
+
+    fn trace_arg0<C: AsRef<[u8]>, C2: AsRef<[u8]>>(
+        mut self, command: &[C], arg0: C2) -> Result<ExitStatus, Error>
     {
         let args = {
             let mut vec = Vec::new();
@@ -296,7 +300,7 @@ impl Tracer {
 pub fn trace<D: AsRef<Path>, C: AsRef<[u8]>>(
     command: &[C], database: D) -> Result<ExitStatus, Error>
 {
-    <Tracer as Default>::default().trace(command, database)
+    Tracer::new(database)?.trace(command)
 }
 
 /// Run a command and trace it, replacing `argv[0]`.
@@ -309,5 +313,5 @@ pub fn trace<D: AsRef<Path>, C: AsRef<[u8]>>(
 pub fn trace_arg0<D: AsRef<Path>, C: AsRef<[u8]>, C2: AsRef<[u8]>>(
     command: &[C], arg0: C2, database: D) -> Result<ExitStatus, Error>
 {
-    <Tracer as Default>::default().trace_arg0(command, arg0, database)
+    Tracer::new(database)?.trace_arg0(command, arg0)
 }
