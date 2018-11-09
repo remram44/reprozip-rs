@@ -1,5 +1,7 @@
 #[macro_use] extern crate bitflags;
 extern crate nix;
+#[macro_use] extern crate slog;
+extern crate slog_stdlog;
 
 mod database;
 
@@ -16,6 +18,7 @@ use nix::sys::ptrace;
 use nix::sys::signal::{Signal, kill};
 use nix::sys::wait;
 use nix::unistd::{ForkResult, Pid, fork, execvp};
+use slog::Drain;
 
 use database::{Database, FileOp, ProcessId};
 
@@ -41,6 +44,10 @@ impl From<NixError> for Error {
     fn from(err: NixError) -> Error {
         Error::Internal(format!("{}", err))
     }
+}
+
+fn p(pid: Pid) -> i32 {
+    pid.into()
 }
 
 /// Exit status from a process, either a return code or a signal.
@@ -83,13 +90,21 @@ impl ThreadInfo {
 }
 
 /// Structure holding all the running threads and processes.
-#[derive(Default)]
 struct Processes {
+    logger: slog::Logger,
     pid2process: HashMap<Pid, Thread>,
     identifier2pid: HashMap<ProcessId, Pid>,
 }
 
 impl Processes {
+    fn new(logger: slog::Logger) -> Processes {
+        Processes {
+            logger,
+            pid2process: Default::default(),
+            identifier2pid: Default::default(),
+        }
+    }
+
     /// Add the first process, which has no parent.
     fn add_first(
         &mut self,
@@ -134,8 +149,12 @@ impl Processes {
             }
             Thread::Unknown { .. } => {}
         }
-        println!("Process exited, {} processes remain",
-                 self.pid2process.len());
+        info!(
+            self.logger,
+            "Process {tid} exited, {remaining} processes remain",
+            tid = p(tid),
+            remaining = self.pid2process.len(),
+        );
         Ok(())
     }
 
@@ -168,15 +187,27 @@ impl Processes {
 
 /// Tracer following processes and logging their execution to a `Database`.
 pub struct Tracer {
+    logger: slog::Logger,
     processes: Processes,
     database: Database,
 }
 
 impl Tracer {
     pub fn new<D: AsRef<Path>>(database: D) -> Result<Tracer, Error> {
+        Self::with_logger(database, None)
+    }
+
+    pub fn with_logger<D: AsRef<Path>, L: Into<Option<slog::Logger>>>(
+        database: D,
+        logger: L,
+    ) -> Result<Tracer, Error> {
+        let logger = logger
+            .into()
+            .unwrap_or(slog::Logger::root(slog_stdlog::StdLog.fuse(), o!()));
         Ok(Tracer {
-            processes: Default::default(),
-            database: Database::new(database)?,
+            logger: logger.clone(),
+            processes: Processes::new(logger.clone()),
+            database: Database::new(database, logger)?,
         })
     }
 
@@ -206,11 +237,11 @@ impl Tracer {
             Ok(c) => c,
             Err(_) => return Err(Error::InvalidCommand),
         };
-        println!("Tracing command: {:?}", args);
+        info!(self.logger, "Tracing command: {:?}", args);
 
         match fork() {
             Ok(ForkResult::Parent { child }) => {
-                println!("Child created, pid={}", child);
+                info!(self.logger, "Child created, pid={pid}", pid = p(child));
                 let wd = current_dir().unwrap();
                 let identifier = self.processes.add_first(
                     child,
@@ -285,13 +316,14 @@ impl Tracer {
                     continue;
                 }
                 wait::WaitStatus::PtraceEvent(pid, sig, event) => {
-                    println!("ptrace event");
+                    warn!(self.logger, "ptrace event");
                     // TODO: handle events, tracer.c:521
                     ptrace::syscall(pid)?;
                 }
                 wait::WaitStatus::Stopped(pid, sig) => {
                     if !self.processes.has_pid(pid) {
-                        println!("process {} appeared", pid);
+                        info!(self.logger, "process {tid} appeared",
+                              tid=p(pid));
                         self.processes.add_unknown(pid)?;
                         Self::set_options(pid)?;
                         // Don't resume, it will be set to ATTACHED and resumed
@@ -306,23 +338,26 @@ impl Tracer {
                     } else {
                         None
                     } {
-                        println!("process {} attached", pid);
+                        info!(self.logger, "process {tid} attached",
+                              tid=p(pid));
                         *thread = Thread::Attached(info);
                         Self::set_options(pid)?;
                         ptrace::syscall(pid)?;
                         continue;
                     }
 
-                    println!("stopped");
                     if sig == Signal::SIGTRAP {
-                        eprintln!("NOT delivering SIGTRAP to {}", pid);
+                        warn!(self.logger, "NOT delivering SIGTRAP";
+                              "tid" => p(pid));
                         ptrace::syscall(pid)?;
                     } else {
-                        println!("Caught signal {:?}", sig);
+                        warn!(self.logger, "caught signal";
+                              "signal" => ?sig, "tid" => p(pid));
                         if ptrace::getsiginfo(pid).is_ok() {
                             ptrace::syscall(pid)?;
                         } else {
-                            eprintln!("NOT delivering {:?} to {}", sig, pid);
+                            warn!(self.logger, "NOT delivering signal";
+                                  "signal" => ?sig, "tip" => p(pid));
                             if sig != Signal::SIGSTOP {
                                 ptrace::syscall(pid)?;
                             }
@@ -330,7 +365,7 @@ impl Tracer {
                     }
                 }
                 wait::WaitStatus::PtraceSyscall(pid) => {
-                    println!("ptrace syscall");
+                    warn!(self.logger, "ptrace syscall");
                     // TODO: syscall, tracer.c:423
                     ptrace::syscall(pid)?;
                 }

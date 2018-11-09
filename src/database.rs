@@ -27,12 +27,16 @@ bitflags! {
 
 /// The database, where we record events about the traced program.
 pub struct Database {
+    logger: slog::Logger,
     next_process: u32,
 }
 
 impl Database {
-    pub fn new<D: AsRef<Path>>(path: D) -> Result<Database, Error> {
-        Ok(Database { next_process: 0 })
+    pub fn new<D: AsRef<Path>>(
+        path: D,
+        logger: slog::Logger,
+    ) -> Result<Database, Error> {
+        Ok(Database { logger, next_process: 0 })
     }
 
     /// Record the creation of a thread or process.
@@ -48,8 +52,11 @@ impl Database {
         let parent_str = parent
             .map(|p| Cow::Owned(format!("{}", p.0)))
             .unwrap_or(Cow::Borrowed("(none)"));
-        println!("Adding process {} parent={} is_thread={} working_dir={}",
-                 proc, parent_str, is_thread, working_dir.to_string_lossy());
+        warn!(
+            self.logger,
+            "Adding process {} parent={} is_thread={} working_dir={}",
+            proc, parent_str, is_thread, working_dir.to_string_lossy()
+        );
         Ok(ProcessId(proc))
     }
 
@@ -62,9 +69,11 @@ impl Database {
         is_directory: bool,
     ) -> Result<(), Error> {
         // TODO
-        println!("Adding file open process={} path={} mode={:?}, \
-                  is_directory={}",
-                 id.0, path.to_string_lossy(), mode, is_directory);
+        warn!(
+            self.logger,
+            "Adding file open process={} path={} mode={:?}, is_directory={}",
+            id.0, path.to_string_lossy(), mode, is_directory,
+        );
         Ok(())
     }
 
@@ -75,7 +84,7 @@ impl Database {
         status: ExitStatus,
     ) -> Result<(), Error> {
         // TODO
-        println!("Adding process exit {} status={:?}", id.0, status);
+        warn!(self.logger, "Adding process exit {} status={:?}", id.0, status);
         Ok(())
     }
 

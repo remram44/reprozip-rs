@@ -6,3 +6,7 @@ authors = ["Remi Rampin <remirampin@gmail.com>"]
 [dependencies]
 bitflags = "1.0"
 nix = "0.11"
+slog = "2"
+slog-term = "2"
+slog-async = "2"
+slog-stdlog = "3"
