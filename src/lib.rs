@@ -111,6 +111,14 @@ impl Processes {
         Ok(identifier)
     }
 
+    /// Add a new process, currently unknown.
+    ///
+    /// This is required because we can see processes appear before we see
+    /// their creator returning from fork().
+    fn add_unknown(&mut self, tid: Pid) -> Result<(), Error> {
+        self.pid2process.insert(tid, Thread::Unknown { tid });
+        Ok(())
+    }
 
     fn exit(&mut self, tid: Pid, exitstatus: ExitStatus,
             database: &mut Database)
@@ -130,6 +138,10 @@ impl Processes {
 
     fn is_empty(&self) -> bool {
         self.pid2process.is_empty()
+    }
+
+    fn has_pid(&self, pid: Pid) -> bool {
+        self.pid2process.contains_key(&pid)
     }
 
     fn get_pid(&self, pid: Pid) -> &Thread {
@@ -264,12 +276,71 @@ impl Tracer {
                     }
                     continue;
                 }
-                // TODO: Handle syscalls
-                _ => unimplemented!(),
+                wait::WaitStatus::PtraceEvent(pid, sig, event) => {
+                    println!("ptrace event");
+                    // TODO: handle events, tracer.c:521
+                    ptrace::syscall(pid)?;
+                }
+                wait::WaitStatus::Stopped(pid, sig) => {
+                    if !self.processes.has_pid(pid) {
+                        println!("process {} appeared", pid);
+                        self.processes.add_unknown(pid)?;
+                        Self::set_options(pid)?;
+                        // Don't resume, it will be set to ATTACHED and resumed
+                        // when the parent returns from fork()
+                        continue;
+                    }
+                    let thread = self.processes.get_pid_mut(pid);
+                    if let Some(info) = if let Thread::Allocated(info) = thread {
+                        // Have to do this in two steps to avoid borrow error
+                        Some(info.clone())
+                    } else {
+                        None
+                    } {
+                        println!("process {} attached", pid);
+                        *thread = Thread::Attached(info);
+                        Self::set_options(pid)?;
+                        ptrace::syscall(pid)?;
+                        continue;
+                    }
+
+                    println!("stopped");
+                    if sig == Signal::SIGTRAP {
+                        eprintln!("NOT delivering SIGTRAP to {}", pid);
+                        ptrace::syscall(pid)?;
+                    } else {
+                        println!("Caught signal {:?}", sig);
+                        if ptrace::getsiginfo(pid).is_ok() {
+                            ptrace::syscall(pid)?;
+                        } else {
+                            eprintln!("NOT delivering {:?} to {}", sig, pid);
+                            if sig != Signal::SIGSTOP {
+                                ptrace::syscall(pid)?;
+                            }
+                        }
+                    }
+                }
+                wait::WaitStatus::PtraceSyscall(pid) => {
+                    println!("ptrace syscall");
+                    // TODO: syscall, tracer.c:423
+                    ptrace::syscall(pid)?;
+                }
+                _ => {}
             }
         }
         Ok(first_exit_code.expect("Trace finished but we never got the first \
                                    process' exit code"))
+    }
+
+    fn set_options(pid: Pid) -> Result<(), Error> {
+        ptrace::setoptions(pid,
+                           ptrace::Options::PTRACE_O_TRACESYSGOOD |
+                           ptrace::Options::PTRACE_O_EXITKILL |
+                           ptrace::Options::PTRACE_O_TRACECLONE |
+                           ptrace::Options::PTRACE_O_TRACEFORK |
+                           ptrace::Options::PTRACE_O_TRACEVFORK |
+                           ptrace::Options::PTRACE_O_TRACEEXEC)?;
+        Ok(())
     }
 }
 
