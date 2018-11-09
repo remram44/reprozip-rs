@@ -3,7 +3,7 @@
 use std::borrow::Cow;
 use std::path::Path;
 
-use ::Error;
+use ::{Error, ExitStatus};
 
 /// The ID assigned to a process in the database.
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
@@ -60,6 +60,16 @@ impl Database {
         println!("Adding file open process={} path={} mode={:?}, \
                   is_directory={}",
                  id.0, path.to_string_lossy(), mode, is_directory);
+        Ok(())
+    }
+
+    /// Record the death of a thread or process.
+    pub fn process_exit(&mut self, id: ProcessId, status: ExitStatus)
+        -> Result<(), Error>
+    {
+        // TODO
+        println!("Adding process exit {} status={:?}",
+                 id.0, status);
         Ok(())
     }
 

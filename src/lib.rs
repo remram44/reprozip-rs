@@ -77,7 +77,7 @@ impl ThreadInfo {
     fn exit(self, exitstatus: ExitStatus, database: &mut Database)
         -> Result<(), Error>
     {
-        unimplemented!()
+        database.process_exit(self.identifier, exitstatus)
     }
 }
 
