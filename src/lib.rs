@@ -51,17 +51,6 @@ pub enum ExitStatus {
     Signal(Signal),
 }
 
-/// Possible status of a thread.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ThreadStatus {
-    /// `fork()` done but not yet attached
-    Allocated,
-    /// Running process
-    Attached,
-    /// Attached but no corresponding fork() has returned yet
-    Unknown,
-}
-
 /// A group of threads, i.e. a process.
 ///
 /// All the threads in a process share some attributes, such as the environment
@@ -71,14 +60,20 @@ struct ThreadGroup {
 }
 
 /// A thread that we are tracking.
-struct Thread {
+enum Thread {
+    Unknown { tid: Pid },
+    Allocated(ThreadInfo),
+    Attached(ThreadInfo)
+}
+
+#[derive(Clone)]
+struct ThreadInfo {
     identifier: ProcessId,
-    status: ThreadStatus,
     tid: Pid,
     thread_group: Rc<ThreadGroup>,
 }
 
-impl Thread {
+impl ThreadInfo {
     fn exit(self, exitstatus: ExitStatus, database: &mut Database)
         -> Result<(), Error>
     {
@@ -96,7 +91,7 @@ struct Processes {
 impl Processes {
     /// Add the first process, which has no parent.
     fn add_first(&mut self, tid: Pid, thread_group: Rc<ThreadGroup>,
-                 status: ThreadStatus, database: &mut Database)
+                 database: &mut Database)
         -> Result<ProcessId, Error>
     {
         let identifier = database.add_process(
@@ -106,48 +101,31 @@ impl Processes {
         )?;
         self.pid2process.insert(
             tid,
-            Thread {
+            Thread::Allocated(ThreadInfo {
                 identifier,
-                status,
                 tid,
                 thread_group,
-            },
+            }),
         );
         self.identifier2pid.insert(identifier, tid);
         Ok(identifier)
     }
 
-    /// Add a new process, which was forked from another.
-    fn add(&mut self, tid: Pid, thread_group: Rc<ThreadGroup>,
-           status: ThreadStatus, parent: ProcessId, is_thread: bool,
-           database: &mut Database)
-        -> Result<ProcessId, Error>
-    {
-        let identifier = database.add_process(
-            Some(parent),
-            &thread_group.working_dir,
-            is_thread,
-        )?;
-        self.pid2process.insert(
-            tid,
-            Thread {
-                identifier,
-                status,
-                tid,
-                thread_group,
-            },
-        );
-        self.identifier2pid.insert(identifier, tid);
-        Ok(identifier)
-    }
 
     fn exit(&mut self, tid: Pid, exitstatus: ExitStatus,
             database: &mut Database)
         -> Result<(), Error>
     {
         let thread = self.pid2process.remove(&tid).unwrap();
-        self.identifier2pid.remove(&thread.identifier);
-        thread.exit(exitstatus, database)
+        match thread {
+            Thread::Allocated(info) | Thread::Attached(info) => {
+                self.identifier2pid.remove(&info.identifier);
+                info.exit(exitstatus, database)?;
+            }
+            Thread::Unknown { .. } => {}
+        }
+        println!("Process exited, {} processes remain", self.pid2process.len());
+        Ok(())
     }
 
     fn is_empty(&self) -> bool {
@@ -221,7 +199,6 @@ impl Tracer {
                     Rc::new(ThreadGroup {
                         working_dir: wd.clone(),
                     }),
-                    ThreadStatus::Allocated,
                     &mut self.database,
                 )?;
                 self.database.add_file_open(identifier, &wd,
