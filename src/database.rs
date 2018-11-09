@@ -1,5 +1,6 @@
 //! This module is responsible for recording information in a SQLite database.
 
+use std::borrow::Cow;
 use std::path::Path;
 
 use ::Error;
@@ -27,6 +28,7 @@ bitflags! {
 /// The database, where we record events about the traced program.
 #[derive(Default)]
 pub struct Database {
+    next_process: u32,
 }
 
 impl Database {
@@ -35,7 +37,15 @@ impl Database {
                        working_dir: &Path, is_thread: bool)
         -> Result<ProcessId, Error>
     {
-        unimplemented!()
+        // TODO
+        let proc = self.next_process;
+        self.next_process += 1;
+        let parent_str = parent
+            .map(|p| Cow::Owned(format!("{}", p.0)))
+            .unwrap_or(Cow::Borrowed("(none)"));
+        println!("Adding process {} parent={} is_thread={} working_dir={}",
+                 proc, parent_str, is_thread, working_dir.to_string_lossy());
+        Ok(ProcessId(proc))
     }
 
     /// Record a file access.
@@ -43,11 +53,16 @@ impl Database {
                          path: &Path, mode: FileOp, is_directory: bool)
         -> Result<(), Error>
     {
-        unimplemented!()
+        // TODO
+        println!("Adding file open process={} path={} mode={:?}, \
+                  is_directory={}",
+                 id.0, path.to_string_lossy(), mode, is_directory);
+        Ok(())
     }
 
     /// Commit the trace to disk.
     pub fn commit(self) -> Result<(), Error> {
-        unimplemented!()
+        // TODO
+        Ok(())
     }
 }
