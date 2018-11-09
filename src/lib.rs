@@ -154,22 +154,22 @@ impl Processes {
         self.pid2process.is_empty()
     }
 
-    fn with_pid(&self, pid: Pid) -> &Thread {
+    fn get_pid(&self, pid: Pid) -> &Thread {
         self.pid2process.get(&pid).unwrap()
     }
 
-    fn with_pid_mut(&mut self, pid: Pid) -> &mut Thread {
+    fn get_pid_mut(&mut self, pid: Pid) -> &mut Thread {
         self.pid2process.get_mut(&pid).unwrap()
     }
 
-    fn with_identifier(&self, id: ProcessId) -> &Thread {
+    fn get_identifier(&self, id: ProcessId) -> &Thread {
         let pid = *self.identifier2pid.get(&id).unwrap();
-        self.with_pid(pid)
+        self.get_pid(pid)
     }
 
-    fn with_identifier_mut(&mut self, id: ProcessId) -> &mut Thread {
+    fn get_identifier_mut(&mut self, id: ProcessId) -> &mut Thread {
         let pid = *self.identifier2pid.get(&id).unwrap();
-        self.with_pid_mut(pid)
+        self.get_pid_mut(pid)
     }
 }
 
