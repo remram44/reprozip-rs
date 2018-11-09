@@ -167,27 +167,27 @@ impl Processes {
 }
 
 /// Tracer following processes and logging their execution to a `Database`.
-struct Tracer {
+pub struct Tracer {
     processes: Processes,
     database: Database,
 }
 
 impl Tracer {
-    fn new<D: AsRef<Path>>(database: D) -> Result<Tracer, Error> {
+    pub fn new<D: AsRef<Path>>(database: D) -> Result<Tracer, Error> {
         Ok(Tracer {
             processes: Default::default(),
             database: Database::new(database)?,
         })
     }
 
-    fn trace<C: AsRef<[u8]>>(
+    pub fn trace<C: AsRef<[u8]>>(
         self,
         command: &[C],
     ) -> Result<ExitStatus, Error> {
         self.trace_arg0(command, &command[0])
     }
 
-    fn trace_arg0<C: AsRef<[u8]>, C2: AsRef<[u8]>>(
+    pub fn trace_arg0<C: AsRef<[u8]>, C2: AsRef<[u8]>>(
         mut self,
         command: &[C],
         arg0: C2,
