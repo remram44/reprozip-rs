@@ -253,6 +253,17 @@ impl Tracer {
                 self.database.add_file_open(identifier, &wd,
                                             FileOp::WDIR, true)?;
                 let ret = self.trace_process(child)?;
+                match ret {
+                    ExitStatus::Return(i) => {
+                        info!(self.logger,
+                              "Finished, first process returned {status}",
+                              status = i);
+                    }
+                    ExitStatus::Signal(s) => {
+                        info!(self.logger, "Finished, first process terminated by a signal";
+                              "signal" => ?s);
+                    }
+                }
                 self.database.commit()?;
                 Ok(ret)
             }
@@ -316,7 +327,7 @@ impl Tracer {
                     continue;
                 }
                 wait::WaitStatus::PtraceEvent(pid, sig, event) => {
-                    warn!(self.logger, "ptrace event");
+                    debug!(self.logger, "ptrace event");
                     // TODO: handle events, tracer.c:521
                     ptrace::syscall(pid)?;
                 }
@@ -365,7 +376,7 @@ impl Tracer {
                     }
                 }
                 wait::WaitStatus::PtraceSyscall(pid) => {
-                    warn!(self.logger, "ptrace syscall");
+                    debug!(self.logger, "ptrace syscall");
                     // TODO: syscall, tracer.c:423
                     ptrace::syscall(pid)?;
                 }
