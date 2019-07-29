@@ -3,7 +3,7 @@
 use std::borrow::Cow;
 use std::path::Path;
 
-use {Error, ExitStatus};
+use crate::{Error, ExitStatus};
 
 /// The ID assigned to a process in the database.
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]

@@ -20,7 +20,7 @@ use nix::sys::wait;
 use nix::unistd::{ForkResult, Pid, fork, execvp};
 use slog::Drain;
 
-use database::{Database, FileOp, ProcessId};
+use crate::database::{Database, FileOp, ProcessId};
 
 /// General error type returned by this crate.
 #[derive(Debug)]
